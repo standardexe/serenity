@@ -372,8 +372,11 @@ void HexEditorWidget::open_file(int fd, String const& path)
         return;
     }
 
+    file->set_filename(path);
+
     m_document_dirty = false;
-    m_editor->set_buffer(file->read_all()); // FIXME: On really huge files, this is never going to work. Should really create a framework to fetch data from the file on-demand.
+    m_editor->set_filename(file);
+    //m_editor->set_buffer(file->read_all()); // FIXME: On really huge files, this is never going to work. Should really create a framework to fetch data from the file on-demand.
     set_path(path);
 }
 

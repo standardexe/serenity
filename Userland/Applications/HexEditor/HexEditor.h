@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "DataProvider.h"
 #include "SearchResultsModel.h"
 #include <AK/ByteBuffer.h>
 #include <AK/Function.h>
@@ -31,14 +32,15 @@ public:
     bool is_readonly() const { return m_readonly; }
     void set_readonly(bool);
 
-    int buffer_size() const { return m_buffer.size(); }
+    int buffer_size() const { return m_buffer->size(); }
+    void set_filename(NonnullRefPtr<Core::File> fd);
     void set_buffer(const ByteBuffer&);
     void fill_selection(u8 fill_byte);
     bool write_to_file(const String& path);
     bool write_to_file(int fd);
 
     void select_all();
-    bool has_selection() const { return !(m_selection_start == -1 || m_selection_end == -1 || (m_selection_end - m_selection_start) < 0 || m_buffer.is_empty()); }
+    bool has_selection() const { return !(m_selection_start == -1 || m_selection_end == -1 || (m_selection_end - m_selection_start) < 0 || m_buffer); }
     size_t selection_size();
     int selection_start_offset() const { return m_selection_start; }
     bool copy_selected_text_to_clipboard();
@@ -71,7 +73,7 @@ private:
     int m_line_spacing { 4 };
     int m_content_length { 0 };
     int m_bytes_per_row { 16 };
-    ByteBuffer m_buffer;
+    OwnPtr<IDataProvider> m_buffer;
     bool m_in_drag_select { false };
     int m_selection_start { 0 };
     int m_selection_end { 0 };
