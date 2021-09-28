@@ -18,6 +18,8 @@ set(SOURCES
     FindDialogGML.h
     GoToOffsetDialogGML.h
     HexEditorWindowGML.h
+    Intervals.h
+    Intervals.cpp
 )
 
 serenity_app(HexEditor ICON app-hex-editor)

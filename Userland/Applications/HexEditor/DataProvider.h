@@ -12,7 +12,7 @@
 #include <AK/Types.h>
 #include <LibCore/File.h>
 
-class IDataProvider {
+class IDataProvider : public RefCounted<IDataProvider> {
 public:
     virtual ~IDataProvider() = default;
 
@@ -43,14 +43,10 @@ public:
     DataProviderFileSystem(NonnullRefPtr<Core::File> fd)
         : m_file(fd)
     {
-        dbgln("Create file system data provider for {}", fd->filename());
-
         struct stat file_stat;
         if (fstat(fd->fd(), &file_stat) < 0) {
-            dbgln("File is empty");
             m_file_size = 0;
         } else {
-            dbgln("Size of file: {}", file_stat.st_size);
             m_file_size = file_stat.st_size;
         }
     }

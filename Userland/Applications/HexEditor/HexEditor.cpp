@@ -49,8 +49,9 @@ void HexEditor::set_readonly(bool readonly)
 
 void HexEditor::set_filename(NonnullRefPtr<Core::File> fd)
 {
-    m_buffer = OwnPtr<IDataProvider>::lift(new DataProviderFileSystem(fd));
-    set_content_length(m_buffer->size());
+    NonnullRefPtr<IDataProvider> provider = NonnullRefPtr<IDataProvider>(*new DataProviderFileSystem(fd));
+    m_intervals = make<Intervals>(Interval { provider->size(), 0, provider, false });
+    set_content_length(m_intervals->size());
     m_tracked_changes.clear();
     m_position = 0;
     m_byte_position = 0;
@@ -60,8 +61,9 @@ void HexEditor::set_filename(NonnullRefPtr<Core::File> fd)
 
 void HexEditor::set_buffer(const ByteBuffer& buffer)
 {
-    m_buffer = OwnPtr<IDataProvider>::lift(new DataProviderMemory(ByteBuffer(buffer)));
-    set_content_length(buffer.size());
+    NonnullRefPtr<IDataProvider> provider = NonnullRefPtr<IDataProvider>(*new DataProviderMemory(ByteBuffer(buffer)));
+    m_intervals = make<Intervals>(Interval { provider->size(), 0, provider, false });
+    set_content_length(m_intervals->size());
     m_tracked_changes.clear();
     m_position = 0;
     m_byte_position = 0;
@@ -85,7 +87,7 @@ void HexEditor::fill_selection(u8)
 
 void HexEditor::set_position(int position)
 {
-    if (position > static_cast<int>(m_buffer->size()))
+    if (position > static_cast<int>(m_intervals->size()))
         return;
 
     m_position = position;
@@ -96,7 +98,7 @@ void HexEditor::set_position(int position)
 
 bool HexEditor::write_to_file(const String& path)
 {
-    if (!m_buffer)
+    if (!m_intervals)
         return true;
 
     int fd = open(path.characters(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
@@ -147,7 +149,7 @@ bool HexEditor::copy_selected_hex_to_clipboard()
 
     StringBuilder output_string_builder;
     for (int i = m_selection_start; i <= m_selection_end; i++)
-        output_string_builder.appendff("{:02X} ", m_buffer->data(i));
+        output_string_builder.appendff("{:02X} ", m_intervals->data(i).value);
 
     GUI::Clipboard::the().set_plain_text(output_string_builder.to_string());
     return true;
@@ -160,7 +162,7 @@ bool HexEditor::copy_selected_text_to_clipboard()
 
     StringBuilder output_string_builder;
     for (int i = m_selection_start; i <= m_selection_end; i++)
-        output_string_builder.append(isprint(m_buffer->data(i)) ? m_buffer->data(i) : '.');
+        output_string_builder.append(isprint(m_intervals->data(i).value) ? m_intervals->data(i).value : '.');
 
     GUI::Clipboard::the().set_plain_text(output_string_builder.to_string());
     return true;
@@ -175,7 +177,7 @@ bool HexEditor::copy_selected_hex_to_clipboard_as_c_code()
     output_string_builder.appendff("unsigned char raw_data[{}] = {{\n", (m_selection_end - m_selection_start) + 1);
     output_string_builder.append("    ");
     for (int i = m_selection_start, j = 1; i <= m_selection_end; i++, j++) {
-        output_string_builder.appendff("{:#02X}", m_buffer->data(i));
+        output_string_builder.appendff("{:#02X}", m_intervals->data(i).value);
         if (i != m_selection_end)
             output_string_builder.append(", ");
         if ((j % 12) == 0) {
@@ -228,7 +230,7 @@ void HexEditor::mousedown_event(GUI::MouseEvent& event)
         auto byte_y = (absolute_y - hex_start_y) / line_height();
         auto offset = (byte_y * m_bytes_per_row) + byte_x;
 
-        if (offset < 0 || offset >= static_cast<int>(m_buffer->size()))
+        if (offset < 0 || offset >= static_cast<int>(m_intervals->size()))
             return;
 
         dbgln_if(HEX_DEBUG, "HexEditor::mousedown_event(hex): offset={}", offset);
@@ -248,7 +250,7 @@ void HexEditor::mousedown_event(GUI::MouseEvent& event)
         auto byte_y = (absolute_y - text_start_y) / line_height();
         auto offset = (byte_y * m_bytes_per_row) + byte_x;
 
-        if (offset < 0 || offset >= static_cast<int>(m_buffer->size()))
+        if (offset < 0 || offset >= static_cast<int>(m_intervals->size()))
             return;
 
         dbgln_if(HEX_DEBUG, "HexEditor::mousedown_event(text): offset={}", offset);
@@ -294,7 +296,7 @@ void HexEditor::mousemove_event(GUI::MouseEvent& event)
             auto byte_y = (absolute_y - hex_start_y) / line_height();
             auto offset = (byte_y * m_bytes_per_row) + byte_x;
 
-            if (offset < 0 || offset > static_cast<int>(m_buffer->size()))
+            if (offset < 0 || offset > static_cast<int>(m_intervals->size()))
                 return;
 
             m_selection_end = offset;
@@ -305,7 +307,7 @@ void HexEditor::mousemove_event(GUI::MouseEvent& event)
             auto byte_x = (absolute_x - text_start_x) / character_width();
             auto byte_y = (absolute_y - text_start_y) / line_height();
             auto offset = (byte_y * m_bytes_per_row) + byte_x;
-            if (offset < 0 || offset > static_cast<int>(m_buffer->size()))
+            if (offset < 0 || offset > static_cast<int>(m_intervals->size()))
                 return;
 
             m_selection_end = offset;
@@ -363,7 +365,7 @@ void HexEditor::keydown_event(GUI::KeyEvent& event)
     }
 
     if (event.key() == KeyCode::Key_Down) {
-        if (m_position + bytes_per_row() < static_cast<int>(m_buffer->size())) {
+        if (m_position + bytes_per_row() < static_cast<int>(m_intervals->size())) {
             m_position += bytes_per_row();
             m_byte_position = 0;
             scroll_position_into_view(m_position);
@@ -385,7 +387,7 @@ void HexEditor::keydown_event(GUI::KeyEvent& event)
     }
 
     if (event.key() == KeyCode::Key_Right) {
-        if (m_position + 1 < static_cast<int>(m_buffer->size())) {
+        if (m_position + 1 < static_cast<int>(m_intervals->size())) {
             m_position++;
             m_byte_position = 0;
             scroll_position_into_view(m_position);
@@ -418,10 +420,10 @@ void HexEditor::keydown_event(GUI::KeyEvent& event)
 void HexEditor::hex_mode_keydown_event(GUI::KeyEvent& event)
 {
     if ((event.key() >= KeyCode::Key_0 && event.key() <= KeyCode::Key_9) || (event.key() >= KeyCode::Key_A && event.key() <= KeyCode::Key_F)) {
-        if (!m_buffer)
+        if (!m_intervals)
             return;
         VERIFY(m_position >= 0);
-        VERIFY(m_position < static_cast<int>(m_buffer->size()));
+        VERIFY(m_position < static_cast<int>(m_intervals->size()));
 
         // yes, this is terrible... but it works.
         // auto value = (event.key() >= KeyCode::Key_0 && event.key() <= KeyCode::Key_9)
@@ -429,12 +431,12 @@ void HexEditor::hex_mode_keydown_event(GUI::KeyEvent& event)
         //     : (event.key() - KeyCode::Key_A) + 0xA;
 
         if (m_byte_position == 0) {
-            m_tracked_changes.set(m_position, m_buffer->data(m_position));
+            m_tracked_changes.set(m_position, m_intervals->data(m_position).value);
             //m_buffer->data(m_position) = value << 4 | (m_buffer->data(m_position) & 0xF); // shift new value left 4 bits, OR with existing last 4 bits
             m_byte_position++;
         } else {
             //m_buffer->data(m_position) = (m_buffer->data(m_position) & 0xF0) | value; // save the first 4 bits, OR the new value in the last 4
-            if (m_position + 1 < static_cast<int>(m_buffer->size()))
+            if (m_position + 1 < static_cast<int>(m_intervals->size()))
                 m_position++;
             m_byte_position = 0;
         }
@@ -447,17 +449,17 @@ void HexEditor::hex_mode_keydown_event(GUI::KeyEvent& event)
 
 void HexEditor::text_mode_keydown_event(GUI::KeyEvent& event)
 {
-    if (!m_buffer)
+    if (!m_intervals)
         return;
     VERIFY(m_position >= 0);
-    VERIFY(m_position < static_cast<int>(m_buffer->size()));
+    VERIFY(m_position < static_cast<int>(m_intervals->size()));
 
     if (event.code_point() == 0) // This is a control key
         return;
 
-    m_tracked_changes.set(m_position, m_buffer->data(m_position));
+    m_tracked_changes.set(m_position, m_intervals->data(m_position).value);
     //m_buffer->data(m_position) = event.code_point();
-    if (m_position + 1 < static_cast<int>(m_buffer->size()))
+    if (m_position + 1 < static_cast<int>(m_intervals->size()))
         m_position++;
     m_byte_position = 0;
 
@@ -487,7 +489,7 @@ void HexEditor::paint_event(GUI::PaintEvent& event)
     painter.add_clip_rect(event.rect());
     painter.fill_rect(event.rect(), palette().color(background_role()));
 
-    if (!m_buffer)
+    if (!m_intervals)
         return;
 
     painter.translate(frame_thickness(), frame_thickness());
@@ -533,7 +535,7 @@ void HexEditor::paint_event(GUI::PaintEvent& event)
     for (int i = min_row; i < max_row; i++) {
         for (int j = 0; j < bytes_per_row(); j++) {
             auto byte_position = (i * bytes_per_row()) + j;
-            if (byte_position >= static_cast<int>(m_buffer->size()))
+            if (byte_position >= static_cast<int>(m_intervals->size()))
                 return;
 
             Color text_color = palette().color(foreground_role());
@@ -565,7 +567,7 @@ void HexEditor::paint_event(GUI::PaintEvent& event)
                 text_color = palette().inactive_selection_text();
             }
 
-            auto line = String::formatted("{:02X}", m_buffer->data(byte_position));
+            auto line = String::formatted("{:02X}", m_intervals->data(byte_position).value);
             painter.draw_text(hex_display_rect, line, Gfx::TextAlignment::TopLeft, text_color);
 
             Gfx::IntRect text_display_rect {
@@ -581,14 +583,14 @@ void HexEditor::paint_event(GUI::PaintEvent& event)
                 painter.fill_rect(text_display_rect, palette().inactive_selection());
             }
 
-            painter.draw_text(text_display_rect, String::formatted("{:c}", isprint(m_buffer->data(byte_position)) ? m_buffer->data(byte_position) : '.'), Gfx::TextAlignment::TopLeft, text_color);
+            painter.draw_text(text_display_rect, String::formatted("{:c}", isprint(m_intervals->data(byte_position).value) ? m_intervals->data(byte_position).value : '.'), Gfx::TextAlignment::TopLeft, text_color);
         }
     }
 }
 
 void HexEditor::select_all()
 {
-    highlight(0, m_buffer->size() - 1);
+    highlight(0, m_intervals->size() - 1);
     set_position(0);
 }
 
