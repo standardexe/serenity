@@ -238,6 +238,13 @@ void HexEditorWidget::initialize_menubar(GUI::Window& window)
     }));
 
     auto& edit_menu = window.add_menu("&Edit");
+    edit_menu.add_action(GUI::CommonActions::make_undo_action([&](const GUI::Action&) {
+        m_editor->undo();
+    }));
+    edit_menu.add_action(GUI::CommonActions::make_redo_action([&](const GUI::Action&) {
+        m_editor->redo();
+    }));
+    edit_menu.add_separator();
     edit_menu.add_action(GUI::CommonActions::make_select_all_action([this](auto&) {
         m_editor->select_all();
         m_editor->update();

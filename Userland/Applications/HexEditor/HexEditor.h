@@ -33,6 +33,9 @@ public:
     bool is_readonly() const { return m_readonly; }
     void set_readonly(bool);
 
+    void undo();
+    void redo();
+
     int buffer_size() const { return m_intervals->size(); }
     void set_filename(NonnullRefPtr<Core::File> fd);
     void set_buffer(const ByteBuffer&);

@@ -47,6 +47,22 @@ void HexEditor::set_readonly(bool readonly)
     m_readonly = readonly;
 }
 
+void HexEditor::undo()
+{
+    m_intervals->undo();
+    set_content_length(m_intervals->size());
+    update();
+    update_status();
+}
+
+void HexEditor::redo()
+{
+    m_intervals->redo();
+    set_content_length(m_intervals->size());
+    update();
+    update_status();
+}
+
 void HexEditor::set_filename(NonnullRefPtr<Core::File> fd)
 {
     NonnullRefPtr<IDataProvider> provider = NonnullRefPtr<IDataProvider>(*new DataProviderFileSystem(fd));
