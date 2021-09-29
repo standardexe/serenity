@@ -265,6 +265,9 @@ void HexEditorWidget::initialize_menubar(GUI::Window& window)
             }
         }
     }));
+    edit_menu.add_action(GUI::CommonActions::make_delete_action([&](auto&) {
+        m_editor->remove_selection();
+    }));
     edit_menu.add_separator();
     edit_menu.add_action(GUI::Action::create("Copy &Hex", { Mod_Ctrl, Key_C }, [&](const GUI::Action&) {
         m_editor->copy_selected_hex_to_clipboard();

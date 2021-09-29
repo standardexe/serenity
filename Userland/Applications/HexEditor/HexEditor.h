@@ -40,6 +40,7 @@ public:
     void set_filename(NonnullRefPtr<Core::File> fd);
     void set_buffer(const ByteBuffer&);
     bool fill_selection(u8 fill_byte);
+    bool remove_selection();
     bool insert_bytes(size_t num_bytes);
     bool write_to_file(const String& path);
     bool write_to_file(int fd);

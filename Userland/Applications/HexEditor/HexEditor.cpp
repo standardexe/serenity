@@ -112,6 +112,23 @@ bool HexEditor::fill_selection(u8 fill_byte)
     return true;
 }
 
+bool HexEditor::remove_selection()
+{
+    if (!has_selection())
+        return true;
+
+    NonnullOwnPtr<IntervalChange> change = make<IntervalChangeRemove>(m_selection_start, selection_size());
+
+    m_intervals->add_change(move(change));
+
+    set_content_length(m_intervals->size());
+
+    update();
+    did_change();
+
+    return true;
+}
+
 bool HexEditor::insert_bytes(size_t num_bytes)
 {
     Optional<ByteBuffer> maybe_buffer = ByteBuffer::create_zeroed(num_bytes);
