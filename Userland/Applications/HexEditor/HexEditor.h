@@ -36,7 +36,7 @@ public:
     int buffer_size() const { return m_intervals->size(); }
     void set_filename(NonnullRefPtr<Core::File> fd);
     void set_buffer(const ByteBuffer&);
-    void fill_selection(u8 fill_byte);
+    bool fill_selection(u8 fill_byte);
     bool write_to_file(const String& path);
     bool write_to_file(int fd);
 
@@ -78,7 +78,6 @@ private:
     bool m_in_drag_select { false };
     int m_selection_start { 0 };
     int m_selection_end { 0 };
-    HashMap<int, u8> m_tracked_changes;
     int m_position { 0 };
     int m_byte_position { 0 }; // 0 or 1
     EditMode m_edit_mode { Hex };

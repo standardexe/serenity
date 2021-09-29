@@ -52,7 +52,6 @@ void HexEditor::set_filename(NonnullRefPtr<Core::File> fd)
     NonnullRefPtr<IDataProvider> provider = NonnullRefPtr<IDataProvider>(*new DataProviderFileSystem(fd));
     m_intervals = make<Intervals>(Interval { provider->size(), 0, provider, false });
     set_content_length(m_intervals->size());
-    m_tracked_changes.clear();
     m_position = 0;
     m_byte_position = 0;
     update();
@@ -64,25 +63,37 @@ void HexEditor::set_buffer(const ByteBuffer& buffer)
     NonnullRefPtr<IDataProvider> provider = NonnullRefPtr<IDataProvider>(*new DataProviderMemory(ByteBuffer(buffer)));
     m_intervals = make<Intervals>(Interval { provider->size(), 0, provider, false });
     set_content_length(m_intervals->size());
-    m_tracked_changes.clear();
     m_position = 0;
     m_byte_position = 0;
     update();
     update_status();
 }
 
-void HexEditor::fill_selection(u8)
+bool HexEditor::fill_selection(u8 fill_byte)
 {
     if (!has_selection())
-        return;
+        return true;
 
-    // for (int i = m_selection_start; i <= m_selection_end; i++) {
-    //     m_tracked_changes.set(i, m_buffer.data()[i]);
-    //     m_buffer.data()[i] = fill_byte;
-    // }
+    Optional<ByteBuffer> maybe_buffer = ByteBuffer::create_uninitialized(selection_size());
+    if (!maybe_buffer.has_value()) {
+        return false;
+    }
+
+    ByteBuffer buffer = maybe_buffer.release_value();
+
+    for (size_t i = 0; i < selection_size(); i++) {
+        buffer.data()[i] = fill_byte;
+    }
+
+    NonnullRefPtr<DataProviderMemory> dataProvider = NonnullRefPtr<DataProviderMemory>(*new DataProviderMemory(move(buffer)));
+    NonnullOwnPtr<IntervalChange> change = make<IntervalChangeModify>(dataProvider, 0, m_selection_start, selection_size());
+
+    m_intervals->add_change(move(change));
 
     update();
     did_change();
+
+    return true;
 }
 
 void HexEditor::set_position(int position)
@@ -426,16 +437,39 @@ void HexEditor::hex_mode_keydown_event(GUI::KeyEvent& event)
         VERIFY(m_position < static_cast<int>(m_intervals->size()));
 
         // yes, this is terrible... but it works.
-        // auto value = (event.key() >= KeyCode::Key_0 && event.key() <= KeyCode::Key_9)
-        //     ? event.key() - KeyCode::Key_0
-        //     : (event.key() - KeyCode::Key_A) + 0xA;
+        auto value = (event.key() >= KeyCode::Key_0 && event.key() <= KeyCode::Key_9)
+            ? event.key() - KeyCode::Key_0
+            : (event.key() - KeyCode::Key_A) + 0xA;
 
         if (m_byte_position == 0) {
-            m_tracked_changes.set(m_position, m_intervals->data(m_position).value);
-            //m_buffer->data(m_position) = value << 4 | (m_buffer->data(m_position) & 0xF); // shift new value left 4 bits, OR with existing last 4 bits
+            Optional<ByteBuffer> maybe_buffer = ByteBuffer::create_uninitialized(1);
+            if (!maybe_buffer.has_value()) {
+                return;
+            }
+
+            ByteBuffer buffer = maybe_buffer.release_value();
+            buffer.data()[0] = value << 4 | (m_intervals->data(m_position).value & 0xF);
+
+            NonnullRefPtr<DataProviderMemory> dataProvider = NonnullRefPtr<DataProviderMemory>(*new DataProviderMemory(move(buffer)));
+            NonnullOwnPtr<IntervalChange> change = make<IntervalChangeModify>(dataProvider, 0, m_position, 1);
+
+            m_intervals->add_change(move(change));
+
             m_byte_position++;
         } else {
-            //m_buffer->data(m_position) = (m_buffer->data(m_position) & 0xF0) | value; // save the first 4 bits, OR the new value in the last 4
+            Optional<ByteBuffer> maybe_buffer = ByteBuffer::create_uninitialized(1);
+            if (!maybe_buffer.has_value()) {
+                return;
+            }
+
+            ByteBuffer buffer = maybe_buffer.release_value();
+            buffer.data()[0] = (m_intervals->data(m_position).value & 0xF0) | value;
+
+            NonnullRefPtr<DataProviderMemory> dataProvider = NonnullRefPtr<DataProviderMemory>(*new DataProviderMemory(move(buffer)));
+            NonnullOwnPtr<IntervalChange> change = make<IntervalChangeModify>(dataProvider, 0, m_position, 1);
+
+            m_intervals->add_change(move(change));
+
             if (m_position + 1 < static_cast<int>(m_intervals->size()))
                 m_position++;
             m_byte_position = 0;
@@ -457,8 +491,19 @@ void HexEditor::text_mode_keydown_event(GUI::KeyEvent& event)
     if (event.code_point() == 0) // This is a control key
         return;
 
-    m_tracked_changes.set(m_position, m_intervals->data(m_position).value);
-    //m_buffer->data(m_position) = event.code_point();
+    Optional<ByteBuffer> maybe_buffer = ByteBuffer::create_uninitialized(1);
+    if (!maybe_buffer.has_value()) {
+        return;
+    }
+
+    ByteBuffer buffer = maybe_buffer.release_value();
+    buffer.data()[0] = event.code_point();
+
+    NonnullRefPtr<DataProviderMemory> dataProvider = NonnullRefPtr<DataProviderMemory>(*new DataProviderMemory(move(buffer)));
+    NonnullOwnPtr<IntervalChange> change = make<IntervalChangeModify>(dataProvider, 0, m_position, 1);
+
+    m_intervals->add_change(move(change));
+
     if (m_position + 1 < static_cast<int>(m_intervals->size()))
         m_position++;
     m_byte_position = 0;
@@ -539,7 +584,7 @@ void HexEditor::paint_event(GUI::PaintEvent& event)
                 return;
 
             Color text_color = palette().color(foreground_role());
-            if (m_tracked_changes.contains(byte_position)) {
+            if (m_intervals->data(byte_position).changed) {
                 text_color = Color::Red;
             }
 
