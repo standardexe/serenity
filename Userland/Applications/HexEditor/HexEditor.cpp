@@ -646,88 +646,88 @@ void HexEditor::highlight(int start, int end)
     set_position(start);
 }
 
-int HexEditor::find_and_highlight(ByteBuffer& needle, int start)
+Optional<int> HexEditor::find_and_highlight(ByteBuffer& needle, int start)
 {
     auto end_of_match = find(needle, start);
-    highlight(end_of_match - needle.size(), end_of_match - 1);
+    if (end_of_match.has_value()) {
+        highlight(end_of_match.value(), end_of_match.value() + needle.size());
+    }
     return end_of_match;
 }
 
-int HexEditor::find(ByteBuffer&, int)
+Optional<int> HexEditor::find(ByteBuffer& needle, int start)
 {
-    // if (m_buffer.is_null())
-    return -1;
+    if (!m_intervals)
+        return {};
 
-    // auto raw_offset = memmem(m_buffer->data() + start, m_buffer.size() - start, needle.data(), needle.size());
-    // if (raw_offset == NULL)
-    //     return -1;
-
-    // int relative_offset = static_cast<const u8*>(raw_offset) - m_buffer.data();
-    // dbgln("find: start={} raw_offset={} relative_offset={}", start, raw_offset, relative_offset);
-
-    // auto end_of_match = relative_offset + needle.size();
-
-    // return end_of_match;
+    size_t offset = start;
+    for (; offset < m_intervals->size() - needle.size(); offset++) {
+        bool matching = true;
+        for (size_t j = 0; matching && j < needle.size(); j++) {
+            matching &= needle[j] == m_intervals->data(offset + j).value;
+        }
+        if (matching) {
+            return static_cast<int>(offset);
+        }
+    }
+    return {};
 }
 
-Vector<Match> HexEditor::find_all(ByteBuffer&, int)
+Vector<Match> HexEditor::find_all(ByteBuffer& needle, int start)
 {
-    // if (m_buffer.is_null())
-    return {};
+    if (!m_intervals)
+        return {};
 
-    // Vector<Match> matches;
+    Vector<Match> matches;
 
-    // size_t i = start;
-    // while (i < m_buffer.size()) {
-    //     auto raw_offset = memmem(m_buffer.data() + i, m_buffer.size() - i, needle.data(), needle.size());
-    //     if (raw_offset == NULL)
-    //         break;
+    size_t offset = start;
+    while (true) {
+        auto match = find(needle, offset);
+        if (!match.has_value())
+            break;
 
-    //     int relative_offset = static_cast<const u8*>(raw_offset) - m_buffer.data();
-    //     dbgln("find_all: needle={} start={} raw_offset={} relative_offset={}", needle.data(), i, raw_offset, relative_offset);
-    //     matches.append({ relative_offset, String::formatted("{}", StringView { needle }.to_string().characters()) });
-    //     i = relative_offset + needle.size();
-    // }
+        matches.append({ match.value(), String::formatted("{}", StringView { needle }.to_string().characters()) });
+        offset = match.value() + needle.size();
+    }
 
-    // if (matches.is_empty())
-    //     return {};
+    if (matches.is_empty())
+        return {};
 
-    // auto first_match = matches.at(0);
-    // highlight(first_match.offset, first_match.offset + first_match.value.length());
+    auto first_match = matches.at(0);
+    highlight(first_match.offset, first_match.offset + first_match.value.length());
 
-    // return matches;
+    return matches;
 }
 
-Vector<Match> HexEditor::find_all_strings(size_t)
+Vector<Match> HexEditor::find_all_strings(size_t min_length)
 {
-    // if (m_buffer.is_empty())
-    return {};
+    if (!m_intervals)
+        return {};
 
-    // Vector<Match> matches;
+    Vector<Match> matches;
 
-    // int offset = -1;
-    // StringBuilder builder;
-    // for (size_t i = 0; i < m_buffer.size(); i++) {
-    //     char c = m_buffer.bytes().at(i);
-    //     if (isprint(c)) {
-    //         if (offset == -1)
-    //             offset = i;
-    //         builder.append(c);
-    //     } else {
-    //         if (builder.length() >= min_length) {
-    //             dbgln("find_all_strings: relative_offset={} string={}", offset, builder.to_string());
-    //             matches.append({ offset, builder.to_string() });
-    //         }
-    //         builder.clear();
-    //         offset = -1;
-    //     }
-    // }
+    int offset = -1;
+    StringBuilder builder;
+    for (size_t i = 0; i < m_intervals->size(); i++) {
+        char c = m_intervals->data(i).value;
+        if (isprint(c)) {
+            if (offset == -1)
+                offset = i;
+            builder.append(c);
+        } else {
+            if (builder.length() >= min_length) {
+                matches.append({ offset, builder.to_string() });
+            }
+            builder.clear();
+            offset = -1;
+        }
+    }
 
-    // if (matches.is_empty())
-    //     return {};
+    if (matches.is_empty())
+        return {};
 
-    // auto first_match = matches.at(0);
-    // highlight(first_match.offset, first_match.offset + first_match.value.length());
+    auto first_match = matches.at(0);
+    highlight(first_match.offset, first_match.offset + first_match.value.length());
 
-    // return matches;
+    return matches;
 }

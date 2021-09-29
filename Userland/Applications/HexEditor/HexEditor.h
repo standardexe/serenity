@@ -53,8 +53,8 @@ public:
 
     void set_position(int position);
     void highlight(int start, int end);
-    int find(ByteBuffer& needle, int start = 0);
-    int find_and_highlight(ByteBuffer& needle, int start = 0);
+    Optional<int> find(ByteBuffer& needle, int start = 0);
+    Optional<int> find_and_highlight(ByteBuffer& needle, int start = 0);
     Vector<Match> find_all(ByteBuffer& needle, int start = 0);
     Vector<Match> find_all_strings(size_t min_length = 4);
     Function<void(int, EditMode, int, int)> on_status_change; // position, edit mode, selection start, selection end
