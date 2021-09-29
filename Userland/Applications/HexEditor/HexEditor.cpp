@@ -96,6 +96,28 @@ bool HexEditor::fill_selection(u8 fill_byte)
     return true;
 }
 
+bool HexEditor::insert_bytes(size_t num_bytes)
+{
+    Optional<ByteBuffer> maybe_buffer = ByteBuffer::create_zeroed(num_bytes);
+    if (!maybe_buffer.has_value()) {
+        return false;
+    }
+
+    ByteBuffer buffer = maybe_buffer.release_value();
+
+    NonnullRefPtr<DataProviderMemory> dataProvider = NonnullRefPtr<DataProviderMemory>(*new DataProviderMemory(move(buffer)));
+    NonnullOwnPtr<IntervalChange> change = make<IntervalChangeInsert>(dataProvider, 0, m_position, num_bytes);
+
+    m_intervals->add_change(move(change));
+
+    set_content_length(m_intervals->size());
+
+    update();
+    did_change();
+
+    return true;
+}
+
 void HexEditor::set_position(int position)
 {
     if (position > static_cast<int>(m_intervals->size()))

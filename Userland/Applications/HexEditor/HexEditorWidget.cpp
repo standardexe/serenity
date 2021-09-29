@@ -249,6 +249,15 @@ void HexEditorWidget::initialize_menubar(GUI::Window& window)
             m_editor->fill_selection(fill_byte);
         }
     }));
+    edit_menu.add_action(GUI::Action::create("&Insert bytes...", { Mod_Ctrl, Key_I }, [&](const GUI::Action&) {
+        String value;
+        if (GUI::InputBox::show(&window, value, "Insert bytes (number):", "Insert bytes") == GUI::InputBox::ExecOK && !value.is_empty()) {
+            auto num_bytes = strtol(value.characters(), nullptr, 10);
+            if (num_bytes > 0) {
+                m_editor->insert_bytes(num_bytes);
+            }
+        }
+    }));
     edit_menu.add_separator();
     edit_menu.add_action(GUI::Action::create("Copy &Hex", { Mod_Ctrl, Key_C }, [&](const GUI::Action&) {
         m_editor->copy_selected_hex_to_clipboard();
