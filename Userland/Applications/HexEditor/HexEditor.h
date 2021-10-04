@@ -8,8 +8,8 @@
 #pragma once
 
 #include "DataProvider.h"
-#include "Intervals.h"
 #include "SearchResultsModel.h"
+#include "Versions.h"
 #include <AK/ByteBuffer.h>
 #include <AK/Function.h>
 #include <AK/HashMap.h>
@@ -36,17 +36,16 @@ public:
     void undo();
     void redo();
 
-    int buffer_size() const { return m_intervals->size(); }
-    void set_filename(NonnullRefPtr<Core::File> fd);
+    size_t buffer_size() const { return m_intervals->size(); }
+    void open_file(NonnullRefPtr<Core::File> fd);
     void set_buffer(const ByteBuffer&);
     bool fill_selection(u8 fill_byte);
     bool remove_selection();
     bool insert_bytes(size_t num_bytes);
     bool write_to_file(const String& path);
-    bool write_to_file(int fd);
 
     void select_all();
-    bool has_selection() const { return !(m_selection_start == -1 || m_selection_end == -1 || (m_selection_end - m_selection_start) < 0 || !m_intervals); }
+    bool has_selection() const { return !(m_selection_start == -1 || m_selection_end == -1 || (m_selection_end - m_selection_start) < 0 || !m_versions); }
     size_t selection_size();
     int selection_start_offset() const { return m_selection_start; }
     bool copy_selected_text_to_clipboard();
@@ -75,11 +74,13 @@ protected:
     virtual void keydown_event(GUI::KeyEvent&) override;
 
 private:
+    String m_path { "" };
     bool m_readonly { false };
     int m_line_spacing { 4 };
     int m_content_length { 0 };
     int m_bytes_per_row { 16 };
-    OwnPtr<Intervals> m_intervals;
+    NonnullRefPtr<IDataProvider> m_data_provider;
+    OwnPtr<VersionHistory> m_versions;
     bool m_in_drag_select { false };
     int m_selection_start { 0 };
     int m_selection_end { 0 };

@@ -39,35 +39,12 @@ int main(int argc, char** argv)
         return GUI::Window::CloseRequestDecision::StayOpen;
     };
 
-    if (unveil("/res", "r") < 0) {
-        perror("unveil");
-        return 1;
-    }
-
-    if (unveil("/tmp/portal/filesystemaccess", "rw") < 0) {
-        perror("unveil");
-        return 1;
-    }
-
-    if (unveil(nullptr, nullptr) < 0) {
-        perror("unveil");
-        return 1;
-    }
-
     hex_editor_widget.initialize_menubar(*window);
     window->show();
     window->set_icon(app_icon.bitmap_for_size(16));
 
     if (argc > 1) {
-        auto response = FileSystemAccessClient::Client::the().request_file_read_only_approved(window->window_id(), argv[1]);
-
-        if (response.error != 0) {
-            if (response.error != -1)
-                GUI::MessageBox::show_error(window, String::formatted("Opening \"{}\" failed: {}", *response.chosen_file, strerror(response.error)));
-            return 1;
-        }
-
-        hex_editor_widget.open_file(*response.fd, *response.chosen_file);
+        hex_editor_widget.open_file(argv[1]);
     }
 
     return app->exec();

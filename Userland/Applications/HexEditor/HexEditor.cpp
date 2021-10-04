@@ -26,6 +26,7 @@
 #include <unistd.h>
 
 HexEditor::HexEditor()
+    : m_data_provider(NonnullRefPtr<IDataProvider>(*new DataProviderMemory(ByteBuffer::create_zeroed(0).value())))
 {
     set_should_hide_unnecessary_scrollbars(true);
     set_focus_policy(GUI::FocusPolicy::StrongFocus);
@@ -49,25 +50,26 @@ void HexEditor::set_readonly(bool readonly)
 
 void HexEditor::undo()
 {
-    m_intervals->undo();
-    set_content_length(m_intervals->size());
+    m_versions->undo();
+    set_content_length(m_versions->size());
     update();
     update_status();
 }
 
 void HexEditor::redo()
 {
-    m_intervals->redo();
-    set_content_length(m_intervals->size());
+    m_versions->redo();
+    set_content_length(m_versions->size());
     update();
     update_status();
 }
 
-void HexEditor::set_filename(NonnullRefPtr<Core::File> fd)
+void HexEditor::open_file(NonnullRefPtr<Core::File> fd)
 {
-    NonnullRefPtr<IDataProvider> provider = NonnullRefPtr<IDataProvider>(*new DataProviderFileSystem(fd));
-    m_intervals = make<Intervals>(Interval { provider->size(), 0, provider, false });
-    set_content_length(m_intervals->size());
+    m_data_provider = NonnullRefPtr<IDataProvider>(*new DataProviderFileSystem(fd));
+    m_versions = make<VersionHistory>(VersionPart { m_data_provider->size(), 0, m_data_provider, true });
+    set_content_length(m_versions->size());
+    m_path = fd->filename();
     m_position = 0;
     m_byte_position = 0;
     update();
@@ -76,9 +78,10 @@ void HexEditor::set_filename(NonnullRefPtr<Core::File> fd)
 
 void HexEditor::set_buffer(const ByteBuffer& buffer)
 {
-    NonnullRefPtr<IDataProvider> provider = NonnullRefPtr<IDataProvider>(*new DataProviderMemory(ByteBuffer(buffer)));
-    m_intervals = make<Intervals>(Interval { provider->size(), 0, provider, false });
-    set_content_length(m_intervals->size());
+    m_data_provider = NonnullRefPtr<IDataProvider>(*new DataProviderMemory(ByteBuffer(buffer)));
+    m_versions = make<VersionHistory>(VersionPart { m_data_provider->size(), 0, m_data_provider, true });
+    set_content_length(m_versions->size());
+    m_path = "";
     m_position = 0;
     m_byte_position = 0;
     update();
@@ -102,9 +105,9 @@ bool HexEditor::fill_selection(u8 fill_byte)
     }
 
     NonnullRefPtr<DataProviderMemory> dataProvider = NonnullRefPtr<DataProviderMemory>(*new DataProviderMemory(move(buffer)));
-    NonnullOwnPtr<IntervalChange> change = make<IntervalChangeModify>(dataProvider, 0, m_selection_start, selection_size());
+    NonnullOwnPtr<VersionChange> change = make<VersionChangeModify>(dataProvider, 0, m_selection_start, selection_size());
 
-    m_intervals->add_change(move(change));
+    m_versions->add_change(move(change));
 
     update();
     did_change();
@@ -117,11 +120,11 @@ bool HexEditor::remove_selection()
     if (!has_selection())
         return true;
 
-    NonnullOwnPtr<IntervalChange> change = make<IntervalChangeRemove>(m_selection_start, selection_size());
+    NonnullOwnPtr<VersionChange> change = make<VersionChangeRemove>(m_selection_start, selection_size());
 
-    m_intervals->add_change(move(change));
+    m_versions->add_change(move(change));
 
-    set_content_length(m_intervals->size());
+    set_content_length(m_versions->size());
 
     update();
     did_change();
@@ -139,11 +142,11 @@ bool HexEditor::insert_bytes(size_t num_bytes)
     ByteBuffer buffer = maybe_buffer.release_value();
 
     NonnullRefPtr<DataProviderMemory> dataProvider = NonnullRefPtr<DataProviderMemory>(*new DataProviderMemory(move(buffer)));
-    NonnullOwnPtr<IntervalChange> change = make<IntervalChangeInsert>(dataProvider, 0, m_position, num_bytes);
+    NonnullOwnPtr<VersionChange> change = make<VersionChangeInsert>(dataProvider, 0, m_position, num_bytes);
 
-    m_intervals->add_change(move(change));
+    m_versions->add_change(move(change));
 
-    set_content_length(m_intervals->size());
+    set_content_length(m_versions->size());
 
     update();
     did_change();
@@ -153,7 +156,7 @@ bool HexEditor::insert_bytes(size_t num_bytes)
 
 void HexEditor::set_position(int position)
 {
-    if (position > static_cast<int>(m_intervals->size()))
+    if (position > static_cast<int>(m_versions->size()))
         return;
 
     m_position = position;
@@ -164,39 +167,29 @@ void HexEditor::set_position(int position)
 
 bool HexEditor::write_to_file(const String& path)
 {
-    if (!m_intervals)
-        return true;
+    auto file_or_error = Core::File::open("/tmp/he.tmp", Core::OpenMode::ReadWrite);
+    if (file_or_error.is_error()) {
+        return false;
+    }
+    // auto file = file_or_error.release_value();
+    // for (size_t i = 0; i < m_versions->size(); i++) {
+    //     u8 data = m_versions->data(i).value;
+    //     file->write(&data, 1);
+    // }
 
-    int fd = open(path.characters(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
-    if (fd < 0) {
-        perror("open");
+    auto result = Core::File::copy_file_or_directory(
+        path, "/tmp/he.tmp",
+        Core::File::RecursionMode::Disallowed,
+        Core::File::LinkMode::Disallowed,
+        Core::File::AddDuplicateFileMarker::No);
+
+    if (result.is_error()) {
         return false;
     }
 
-    return write_to_file(fd);
-}
+    m_versions->set_new_base_version_as_current_version(VersionPart { m_data_provider->size(), 0, m_data_provider, true });
 
-bool HexEditor::write_to_file(int)
-{
-    // ScopeGuard fd_guard = [fd] { close(fd); };
-
-    // int rc = ftruncate(fd, m_buffer->size());
-    // if (rc < 0) {
-    //     perror("ftruncate");
-    //     return false;
-    // }
-
-    // ssize_t nwritten = write(fd, m_buffer.data(), m_buffer->size());
-    // if (nwritten < 0) {
-    //     perror("write");
-    //     close(fd);
-    //     return false;
-    // }
-
-    // if (static_cast<size_t>(nwritten) == m_buffer.size()) {
-    //     m_tracked_changes.clear();
-    //     update();
-    // }
+    update();
 
     return true;
 }
@@ -215,7 +208,7 @@ bool HexEditor::copy_selected_hex_to_clipboard()
 
     StringBuilder output_string_builder;
     for (int i = m_selection_start; i <= m_selection_end; i++)
-        output_string_builder.appendff("{:02X} ", m_intervals->data(i).value);
+        output_string_builder.appendff("{:02X} ", m_versions->data(i).value);
 
     GUI::Clipboard::the().set_plain_text(output_string_builder.to_string());
     return true;
@@ -228,7 +221,7 @@ bool HexEditor::copy_selected_text_to_clipboard()
 
     StringBuilder output_string_builder;
     for (int i = m_selection_start; i <= m_selection_end; i++)
-        output_string_builder.append(isprint(m_intervals->data(i).value) ? m_intervals->data(i).value : '.');
+        output_string_builder.append(isprint(m_versions->data(i).value) ? m_versions->data(i).value : '.');
 
     GUI::Clipboard::the().set_plain_text(output_string_builder.to_string());
     return true;
@@ -243,7 +236,7 @@ bool HexEditor::copy_selected_hex_to_clipboard_as_c_code()
     output_string_builder.appendff("unsigned char raw_data[{}] = {{\n", (m_selection_end - m_selection_start) + 1);
     output_string_builder.append("    ");
     for (int i = m_selection_start, j = 1; i <= m_selection_end; i++, j++) {
-        output_string_builder.appendff("{:#02X}", m_intervals->data(i).value);
+        output_string_builder.appendff("{:#02X}", m_versions->data(i).value);
         if (i != m_selection_end)
             output_string_builder.append(", ");
         if ((j % 12) == 0) {
@@ -296,7 +289,7 @@ void HexEditor::mousedown_event(GUI::MouseEvent& event)
         auto byte_y = (absolute_y - hex_start_y) / line_height();
         auto offset = (byte_y * m_bytes_per_row) + byte_x;
 
-        if (offset < 0 || offset >= static_cast<int>(m_intervals->size()))
+        if (offset < 0 || offset >= static_cast<int>(m_versions->size()))
             return;
 
         dbgln_if(HEX_DEBUG, "HexEditor::mousedown_event(hex): offset={}", offset);
@@ -316,7 +309,7 @@ void HexEditor::mousedown_event(GUI::MouseEvent& event)
         auto byte_y = (absolute_y - text_start_y) / line_height();
         auto offset = (byte_y * m_bytes_per_row) + byte_x;
 
-        if (offset < 0 || offset >= static_cast<int>(m_intervals->size()))
+        if (offset < 0 || offset >= static_cast<int>(m_versions->size()))
             return;
 
         dbgln_if(HEX_DEBUG, "HexEditor::mousedown_event(text): offset={}", offset);
@@ -362,7 +355,7 @@ void HexEditor::mousemove_event(GUI::MouseEvent& event)
             auto byte_y = (absolute_y - hex_start_y) / line_height();
             auto offset = (byte_y * m_bytes_per_row) + byte_x;
 
-            if (offset < 0 || offset > static_cast<int>(m_intervals->size()))
+            if (offset < 0 || offset > static_cast<int>(m_versions->size()))
                 return;
 
             m_selection_end = offset;
@@ -373,7 +366,7 @@ void HexEditor::mousemove_event(GUI::MouseEvent& event)
             auto byte_x = (absolute_x - text_start_x) / character_width();
             auto byte_y = (absolute_y - text_start_y) / line_height();
             auto offset = (byte_y * m_bytes_per_row) + byte_x;
-            if (offset < 0 || offset > static_cast<int>(m_intervals->size()))
+            if (offset < 0 || offset > static_cast<int>(m_versions->size()))
                 return;
 
             m_selection_end = offset;
@@ -431,7 +424,7 @@ void HexEditor::keydown_event(GUI::KeyEvent& event)
     }
 
     if (event.key() == KeyCode::Key_Down) {
-        if (m_position + bytes_per_row() < static_cast<int>(m_intervals->size())) {
+        if (m_position + bytes_per_row() < static_cast<int>(m_versions->size())) {
             m_position += bytes_per_row();
             m_byte_position = 0;
             scroll_position_into_view(m_position);
@@ -453,7 +446,7 @@ void HexEditor::keydown_event(GUI::KeyEvent& event)
     }
 
     if (event.key() == KeyCode::Key_Right) {
-        if (m_position + 1 < static_cast<int>(m_intervals->size())) {
+        if (m_position + 1 < static_cast<int>(m_versions->size())) {
             m_position++;
             m_byte_position = 0;
             scroll_position_into_view(m_position);
@@ -486,10 +479,10 @@ void HexEditor::keydown_event(GUI::KeyEvent& event)
 void HexEditor::hex_mode_keydown_event(GUI::KeyEvent& event)
 {
     if ((event.key() >= KeyCode::Key_0 && event.key() <= KeyCode::Key_9) || (event.key() >= KeyCode::Key_A && event.key() <= KeyCode::Key_F)) {
-        if (!m_intervals)
+        if (!m_versions)
             return;
         VERIFY(m_position >= 0);
-        VERIFY(m_position < static_cast<int>(m_intervals->size()));
+        VERIFY(m_position < static_cast<int>(m_versions->size()));
 
         // yes, this is terrible... but it works.
         auto value = (event.key() >= KeyCode::Key_0 && event.key() <= KeyCode::Key_9)
@@ -503,12 +496,12 @@ void HexEditor::hex_mode_keydown_event(GUI::KeyEvent& event)
             }
 
             ByteBuffer buffer = maybe_buffer.release_value();
-            buffer.data()[0] = value << 4 | (m_intervals->data(m_position).value & 0xF);
+            buffer.data()[0] = value << 4 | (m_versions->data(m_position).value & 0xF);
 
             NonnullRefPtr<DataProviderMemory> dataProvider = NonnullRefPtr<DataProviderMemory>(*new DataProviderMemory(move(buffer)));
-            NonnullOwnPtr<IntervalChange> change = make<IntervalChangeModify>(dataProvider, 0, m_position, 1);
+            NonnullOwnPtr<VersionChange> change = make<VersionChangeModify>(dataProvider, 0, m_position, 1);
 
-            m_intervals->add_change(move(change));
+            m_versions->add_change(move(change));
 
             m_byte_position++;
         } else {
@@ -518,14 +511,14 @@ void HexEditor::hex_mode_keydown_event(GUI::KeyEvent& event)
             }
 
             ByteBuffer buffer = maybe_buffer.release_value();
-            buffer.data()[0] = (m_intervals->data(m_position).value & 0xF0) | value;
+            buffer.data()[0] = (m_versions->data(m_position).value & 0xF0) | value;
 
-            NonnullRefPtr<DataProviderMemory> dataProvider = NonnullRefPtr<DataProviderMemory>(*new DataProviderMemory(move(buffer)));
-            NonnullOwnPtr<IntervalChange> change = make<IntervalChangeModify>(dataProvider, 0, m_position, 1);
+            NonnullRefPtr<DataProviderMemory> data_provider = NonnullRefPtr<DataProviderMemory>(*new DataProviderMemory(move(buffer)));
+            NonnullOwnPtr<VersionChange> change = make<VersionChangeModify>(data_provider, 0, m_position, 1);
 
-            m_intervals->add_change(move(change));
+            m_versions->add_change(move(change));
 
-            if (m_position + 1 < static_cast<int>(m_intervals->size()))
+            if (m_position + 1 < static_cast<int>(m_versions->size()))
                 m_position++;
             m_byte_position = 0;
         }
@@ -538,10 +531,10 @@ void HexEditor::hex_mode_keydown_event(GUI::KeyEvent& event)
 
 void HexEditor::text_mode_keydown_event(GUI::KeyEvent& event)
 {
-    if (!m_intervals)
+    if (!m_versions)
         return;
     VERIFY(m_position >= 0);
-    VERIFY(m_position < static_cast<int>(m_intervals->size()));
+    VERIFY(m_position < static_cast<int>(m_versions->size()));
 
     if (event.code_point() == 0) // This is a control key
         return;
@@ -554,12 +547,14 @@ void HexEditor::text_mode_keydown_event(GUI::KeyEvent& event)
     ByteBuffer buffer = maybe_buffer.release_value();
     buffer.data()[0] = event.code_point();
 
-    NonnullRefPtr<DataProviderMemory> dataProvider = NonnullRefPtr<DataProviderMemory>(*new DataProviderMemory(move(buffer)));
-    NonnullOwnPtr<IntervalChange> change = make<IntervalChangeModify>(dataProvider, 0, m_position, 1);
+    NonnullRefPtr<DataProviderMemory> data_provider = NonnullRefPtr<DataProviderMemory>(*new DataProviderMemory(move(buffer)));
+    NonnullOwnPtr<VersionChange> change = make<VersionChangeModify>(data_provider, 0, m_position, 1);
 
-    m_intervals->add_change(move(change));
+    if (!m_versions->add_change(move(change))) {
+        GUI::MessageBox::show_error(window(), "Could not apply change!");
+    }
 
-    if (m_position + 1 < static_cast<int>(m_intervals->size()))
+    if (m_position + 1 < static_cast<int>(m_versions->size()))
         m_position++;
     m_byte_position = 0;
 
@@ -589,7 +584,7 @@ void HexEditor::paint_event(GUI::PaintEvent& event)
     painter.add_clip_rect(event.rect());
     painter.fill_rect(event.rect(), palette().color(background_role()));
 
-    if (!m_intervals)
+    if (!m_versions)
         return;
 
     painter.translate(frame_thickness(), frame_thickness());
@@ -635,11 +630,11 @@ void HexEditor::paint_event(GUI::PaintEvent& event)
     for (int i = min_row; i < max_row; i++) {
         for (int j = 0; j < bytes_per_row(); j++) {
             auto byte_position = (i * bytes_per_row()) + j;
-            if (byte_position >= static_cast<int>(m_intervals->size()))
+            if (byte_position >= static_cast<int>(m_versions->size()))
                 return;
 
             Color text_color = palette().color(foreground_role());
-            if (m_intervals->data(byte_position).changed) {
+            if (!m_versions->data(byte_position).saved) {
                 text_color = Color::Red;
             }
 
@@ -667,7 +662,7 @@ void HexEditor::paint_event(GUI::PaintEvent& event)
                 text_color = palette().inactive_selection_text();
             }
 
-            auto line = String::formatted("{:02X}", m_intervals->data(byte_position).value);
+            auto line = String::formatted("{:02X}", m_versions->data(byte_position).value);
             painter.draw_text(hex_display_rect, line, Gfx::TextAlignment::TopLeft, text_color);
 
             Gfx::IntRect text_display_rect {
@@ -683,14 +678,14 @@ void HexEditor::paint_event(GUI::PaintEvent& event)
                 painter.fill_rect(text_display_rect, palette().inactive_selection());
             }
 
-            painter.draw_text(text_display_rect, String::formatted("{:c}", isprint(m_intervals->data(byte_position).value) ? m_intervals->data(byte_position).value : '.'), Gfx::TextAlignment::TopLeft, text_color);
+            painter.draw_text(text_display_rect, String::formatted("{:c}", isprint(m_versions->data(byte_position).value) ? m_versions->data(byte_position).value : '.'), Gfx::TextAlignment::TopLeft, text_color);
         }
     }
 }
 
 void HexEditor::select_all()
 {
-    highlight(0, m_intervals->size() - 1);
+    highlight(0, m_versions->size() - 1);
     set_position(0);
 }
 
@@ -712,14 +707,14 @@ Optional<int> HexEditor::find_and_highlight(ByteBuffer& needle, int start)
 
 Optional<int> HexEditor::find(ByteBuffer& needle, int start)
 {
-    if (!m_intervals)
+    if (!m_versions)
         return {};
 
     size_t offset = start;
-    for (; offset < m_intervals->size() - needle.size(); offset++) {
+    for (; offset < m_versions->size() - needle.size(); offset++) {
         bool matching = true;
         for (size_t j = 0; matching && j < needle.size(); j++) {
-            matching &= needle[j] == m_intervals->data(offset + j).value;
+            matching &= needle[j] == m_versions->data(offset + j).value;
         }
         if (matching) {
             return static_cast<int>(offset);
@@ -730,7 +725,7 @@ Optional<int> HexEditor::find(ByteBuffer& needle, int start)
 
 Vector<Match> HexEditor::find_all(ByteBuffer& needle, int start)
 {
-    if (!m_intervals)
+    if (!m_versions)
         return {};
 
     Vector<Match> matches;
@@ -756,15 +751,15 @@ Vector<Match> HexEditor::find_all(ByteBuffer& needle, int start)
 
 Vector<Match> HexEditor::find_all_strings(size_t min_length)
 {
-    if (!m_intervals)
+    if (!m_versions)
         return {};
 
     Vector<Match> matches;
 
     int offset = -1;
     StringBuilder builder;
-    for (size_t i = 0; i < m_intervals->size(); i++) {
-        char c = m_intervals->data(i).value;
+    for (size_t i = 0; i < m_versions->size(); i++) {
+        char c = m_versions->data(i).value;
         if (isprint(c)) {
             if (offset == -1)
                 offset = i;

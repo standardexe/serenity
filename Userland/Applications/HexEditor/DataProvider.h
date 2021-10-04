@@ -44,7 +44,7 @@ public:
         : m_file(fd)
     {
         struct stat file_stat;
-        if (fstat(fd->fd(), &file_stat) < 0) {
+        if (lstat(fd->filename().characters(), &file_stat) < 0) {
             m_file_size = 0;
         } else {
             m_file_size = file_stat.st_size;

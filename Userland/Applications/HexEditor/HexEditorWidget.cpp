@@ -90,11 +90,9 @@ HexEditorWidget::HexEditorWidget()
     });
 
     m_open_action = GUI::CommonActions::make_open_action([this](auto&) {
-        auto response = FileSystemAccessClient::Client::the().open_file(window()->window_id());
+        auto response = GUI::FilePicker::get_open_filepath(window());
 
-        if (response.error != 0) {
-            if (response.error != -1)
-                GUI::MessageBox::show_error(window(), String::formatted("Opening \"{}\" failed: {}", *response.chosen_file, strerror(response.error)));
+        if (!response.has_value()) {
             return;
         }
 
@@ -106,22 +104,14 @@ HexEditorWidget::HexEditorWidget()
                 return;
         }
 
-        open_file(*response.fd, *response.chosen_file);
+        open_file(response.value());
     });
 
     m_save_action = GUI::CommonActions::make_save_action([&](auto&) {
         if (m_path.is_empty())
             return m_save_as_action->activate();
 
-        auto response = FileSystemAccessClient::Client::the().request_file(window()->window_id(), m_path, Core::OpenMode::Truncate | Core::OpenMode::WriteOnly);
-
-        if (response.error != 0) {
-            if (response.error != -1)
-                GUI::MessageBox::show_error(window(), String::formatted("Unable to save file: {}", strerror(response.error)));
-            return;
-        }
-
-        if (!m_editor->write_to_file(*response.fd)) {
+        if (!m_editor->write_to_file(m_path)) {
             GUI::MessageBox::show(window(), "Unable to save file.\n", "Error", GUI::MessageBox::Type::Error);
         } else {
             m_document_dirty = false;
@@ -131,22 +121,19 @@ HexEditorWidget::HexEditorWidget()
     });
 
     m_save_as_action = GUI::CommonActions::make_save_as_action([&](auto&) {
-        auto response = FileSystemAccessClient::Client::the().save_file(window()->window_id(), m_name, m_extension);
+        auto response = GUI::FilePicker::get_save_filepath(window(), m_name, m_extension);
 
-        if (response.error != 0) {
-            if (response.error != -1)
-                GUI::MessageBox::show_error(window(), String::formatted("Saving \"{}\" failed: {}", *response.chosen_file, strerror(response.error)));
+        if (!response.has_value()) {
             return;
         }
 
-        if (!m_editor->write_to_file(*response.fd)) {
+        if (!m_editor->write_to_file(*response)) {
             GUI::MessageBox::show(window(), "Unable to save file.\n", "Error", GUI::MessageBox::Type::Error);
             return;
         }
 
         m_document_dirty = false;
-        set_path(*response.chosen_file);
-        dbgln("Wrote document to {}", *response.chosen_file);
+        set_path(*response);
     });
 
     m_find_action = GUI::Action::create("&Find", { Mod_Ctrl, Key_F }, Gfx::Bitmap::try_load_from_file("/res/icons/16x16/find.png"), [&](const GUI::Action&) {
@@ -371,13 +358,14 @@ void HexEditorWidget::update_title()
     window()->set_title(builder.to_string());
 }
 
-void HexEditorWidget::open_file(int fd, String const& path)
+void HexEditorWidget::open_file(String const& path)
 {
     VERIFY(path.starts_with("/"sv));
     auto file = Core::File::construct();
+    auto result = file->open(path, Core::OpenMode::ReadOnly);
 
-    if (!file->open(fd, Core::OpenMode::ReadOnly, Core::File::ShouldCloseFileDescriptor::Yes) && file->error() != ENOENT) {
-        GUI::MessageBox::show(window(), String::formatted("Opening \"{}\" failed: {}", path, strerror(errno)), "Error", GUI::MessageBox::Type::Error);
+    if (result.is_error() || file->error() == ENOENT) {
+        GUI::MessageBox::show(window(), String::formatted("Opening \"{}\" failed: {}", path, file->error_string()), "Error", GUI::MessageBox::Type::Error);
         return;
     }
 
@@ -391,11 +379,8 @@ void HexEditorWidget::open_file(int fd, String const& path)
         return;
     }
 
-    file->set_filename(path);
-
     m_document_dirty = false;
-    m_editor->set_filename(file);
-    //m_editor->set_buffer(file->read_all()); // FIXME: On really huge files, this is never going to work. Should really create a framework to fetch data from the file on-demand.
+    m_editor->open_file(result.value());
     set_path(path);
 }
 
@@ -430,12 +415,6 @@ void HexEditorWidget::drop_event(GUI::DropEvent& event)
             return;
         window()->move_to_front();
 
-        // TODO: A drop event should be considered user consent for opening a file
-        auto file_response = FileSystemAccessClient::Client::the().request_file(window()->window_id(), urls.first().path(), Core::OpenMode::ReadOnly);
-
-        if (file_response.error != 0)
-            return;
-
-        open_file(*file_response.fd, urls.first().path());
+        open_file(urls.first().path());
     }
 }
