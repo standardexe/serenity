@@ -25,6 +25,7 @@ class Type;
 class Parameter;
 class Statement;
 class Name;
+class Expression;
 
 class ASTNode : public RefCounted<ASTNode> {
 public:
@@ -262,6 +263,28 @@ private:
     RefPtr<Name> m_name;
 };
 
+class ArrayType : public Type {
+public:
+    virtual ~ArrayType() override = default;
+    virtual const char* class_name() const override { return "ArrayType"; }
+    virtual String to_string() const override;
+
+    ArrayType(ASTNode* parent, Optional<Position> start, Optional<Position> end, const String& filename)
+        : Type(parent, start, end, filename)
+    {
+    }
+
+    const Type* base_type() const { return m_base_type.ptr(); }
+    void set_base_type(RefPtr<Type>&& base) { m_base_type = move(base); }
+
+    const Expression* array_size() const { return m_array_size_expression.ptr(); }
+    void set_array_size(RefPtr<Expression>&& expr) { m_array_size_expression = move(expr); }
+
+private:
+    RefPtr<Expression> m_array_size_expression;
+    RefPtr<Type> m_base_type;
+};
+
 class Pointer : public Type {
 public:
     virtual ~Pointer() override = default;
@@ -421,7 +444,7 @@ public:
     void set_name(StringView&& name) { m_name = move(name); }
 
 private:
-    StringView m_name;
+    String m_name;
 };
 
 class Name : public Expression {
@@ -472,6 +495,8 @@ public:
     virtual ~NumericLiteral() override = default;
     virtual const char* class_name() const override { return "NumericLiteral"; }
     virtual void dump(FILE* = stdout, size_t indent = 0) const override;
+
+    StringView value() const { return m_value; }
 
     NumericLiteral(ASTNode* parent, Optional<Position> start, Optional<Position> end, const String& filename, StringView value)
         : Expression(parent, start, end, filename)

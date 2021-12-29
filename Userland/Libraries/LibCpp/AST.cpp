@@ -75,6 +75,11 @@ void Type::dump(FILE* output, size_t indent) const
     outln(output, "{}", to_string());
 }
 
+String ArrayType::to_string() const
+{
+    return String::formatted("{}[{}]", base_type()->to_string(), array_size()->class_name());
+}
+
 String NamedType::to_string() const
 {
     String qualifiers_string;

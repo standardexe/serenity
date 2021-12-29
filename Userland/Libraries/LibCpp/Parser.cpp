@@ -293,6 +293,13 @@ bool Parser::match_variable_declaration()
 
     (void)parse_name(get_dummy_node());
 
+    if (peek().type() == Token::Type::LeftBracket) {
+        dbgln("match []");
+        consume(Token::Type::LeftBracket);
+        [[maybe_unused]] auto array_expr = parse_expression(get_dummy_node());
+        consume(Token::Type::RightBracket);
+    }
+
     if (match(Token::Type::Equals)) {
         consume(Token::Type::Equals);
         if (!match_expression()) {
@@ -318,7 +325,19 @@ NonnullRefPtr<VariableDeclaration> Parser::parse_variable_declaration(ASTNode& p
         return var;
     }
     var->set_type(parse_type(var));
+
     auto identifier_token = consume(Token::Type::Identifier);
+
+    if (peek().type() == Token::Type::LeftBracket) {
+        consume(Token::Type::LeftBracket);
+        auto array_expr = parse_expression(var);
+        consume(Token::Type::RightBracket);
+        auto array = create_ast_node<ArrayType>(var, array_expr->start(), array_expr->end());
+        array->set_array_size(move(array_expr));
+        array->set_base_type(var->type());
+        var->set_type(array);
+    }
+
     RefPtr<Expression> initial_value;
 
     if (match(Token::Type::Equals)) {
@@ -693,8 +712,10 @@ bool Parser::match_class_declaration()
             while (match_keyword("private") || match_keyword("public") || match_keyword("protected") || match_keyword("virtual"))
                 consume();
 
+            dbgln("Match struct member name");
             if (!match_name())
                 return false;
+            dbgln("Parse struct member name");
             (void)parse_name(get_dummy_node());
         } while (peek().type() == Token::Type::Comma);
     }
@@ -1428,8 +1449,13 @@ NonnullRefPtr<Name> Parser::parse_name(ASTNode& parent)
     }
 
     if (peek().type() == Token::Type::Identifier || peek().type() == Token::Type::KnownType) {
-        auto token = consume();
-        name_node->set_name(create_ast_node<Identifier>(*name_node, token.start(), token.end(), token.text()));
+        auto start_token = consume();
+        String text = start_token.text();
+        while (peek().type() == Token::Type::KnownType) {
+            auto token = consume();
+            text = String::formatted("{} {}", text, token.text());
+        }
+        name_node->set_name(create_ast_node<Identifier>(*name_node, start_token.start(), peek().end(), text));
     } else {
         name_node->set_end(position());
         return name_node;
