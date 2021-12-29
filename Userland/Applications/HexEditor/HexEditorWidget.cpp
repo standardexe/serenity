@@ -9,11 +9,14 @@
 #include "FindDialog.h"
 #include "GoToOffsetDialog.h"
 #include "SearchResultsModel.h"
+#include "StructManager.h"
 #include <AK/Optional.h>
 #include <AK/StringBuilder.h>
 #include <Applications/HexEditor/HexEditorWindowGML.h>
 #include <LibConfig/Client.h>
 #include <LibCore/File.h>
+#include <LibCpp/Lexer.h>
+#include <LibCpp/Parser.h>
 #include <LibFileSystemAccessClient/Client.h>
 #include <LibGUI/Action.h>
 #include <LibGUI/BoxLayout.h>
@@ -43,6 +46,74 @@ HexEditorWidget::HexEditorWidget()
     m_statusbar = *find_descendant_of_type_named<GUI::Statusbar>("statusbar");
     m_search_results = *find_descendant_of_type_named<GUI::TableView>("search_results");
     m_search_results_container = *find_descendant_of_type_named<GUI::Widget>("search_results_container");
+    m_struct_container = *find_descendant_of_type_named<GUI::Widget>("struct_container");
+    m_struct_load_button = *find_descendant_of_type_named<GUI::Button>("struct_load_button");
+
+    m_struct_load_button->on_click = [this]([[maybe_unused]] unsigned modifiers) {
+        auto response = FileSystemAccessClient::Client::the().open_file(window()->window_id(), {}, Core::StandardPaths::home_directory(), Core::OpenMode::ReadWrite);
+
+        if (response.error != 0) {
+            if (response.error != -1)
+                GUI::MessageBox::show_error(window(), String::formatted("Opening \"{}\" failed: {}", *response.chosen_file, strerror(response.error)));
+            return;
+        }
+
+        auto file = Core::File::construct();
+
+        if (!file->open(*response.fd, Core::OpenMode::ReadWrite, Core::File::ShouldCloseFileDescriptor::Yes) && file->error() != ENOENT) {
+            GUI::MessageBox::show(window(), String::formatted("Opening \"{}\" failed: {}", *response.chosen_file, strerror(errno)), "Error", GUI::MessageBox::Type::Error);
+            return;
+        }
+
+        auto content = file->read_all();
+        StringView content_view(content);
+
+        ::Cpp::Preprocessor processor(*response.chosen_file, content_view);
+        auto tokens = processor.process_and_lex();
+
+        ::Cpp::Parser parser(tokens, *response.chosen_file);
+        auto root = parser.parse();
+
+        for (auto& declaration : root->declarations()) {
+            if (declaration.is_struct()) {
+                dbgln("Struct found: {}", declaration.name());
+                auto s = make_ref_counted<Struct>(declaration.name());
+                auto& structDecl = verify_cast<Cpp::StructOrClassDeclaration>(declaration);
+                for (auto& member : structDecl.members()) {
+                    if (member.is_variable_declaration()) {
+                        auto& varDecl = verify_cast<Cpp::VariableDeclaration>(member);
+                        dbgln("Member: {} with type {}", varDecl.name(), varDecl.type()->to_string());
+                        if (strcmp(varDecl.type()->class_name(), "ArrayType") == 0) {
+                            auto& arr_decl = verify_cast<Cpp::ArrayType>(*varDecl.type());
+                            auto maybe_type = IntrinsicType::create(arr_decl.base_type()->to_string());
+                            if (maybe_type.is_error()) {
+                                dbgln("Could not parse member type.");
+                                continue;
+                            }
+                            // FIXME: Write basic constexpr expression evaluator
+                            auto& number_literal = verify_cast<Cpp::NumericLiteral>(*arr_decl.array_size());
+                            auto array_type = make_ref_counted<ArrayType>(number_literal.value().to_int().value_or(0), maybe_type.release_value());
+                            s->add_member(StructMember(varDecl.name(), array_type));
+                        } else {
+                            auto maybe_type = IntrinsicType::create(varDecl.type()->to_string());
+                            if (maybe_type.is_error()) {
+                                dbgln("Could not parse member type.");
+                                continue;
+                            }
+                            s->add_member(StructMember(varDecl.name(), maybe_type.value()));
+                        }
+                    } else {
+                        dbgln("Not a var decl: {}", member.name());
+                    }
+                }
+
+                dbgln("Struct {}:", s->name());
+                for (auto& member : *s) {
+                    dbgln("({}) {}: {} ({} bytes)", member.offset(), member.name(), member.type().name(), member.type().size_in_bytes());
+                }
+            }
+        }
+    };
 
     m_editor->on_status_change = [this](int position, HexEditor::EditMode edit_mode, int selection_start, int selection_end) {
         m_statusbar->set_text(0, String::formatted("Offset: {:#08X}", position));
@@ -200,6 +271,10 @@ HexEditorWidget::HexEditorWidget()
         set_search_results_visible(action.is_checked());
     });
 
+    m_layout_structs_action = GUI::Action::create_checkable("S&tructs", [&](auto& action) {
+        m_struct_container->set_visible(action.is_checked());
+    });
+
     m_toolbar->add_action(*m_new_action);
     m_toolbar->add_action(*m_open_action);
     m_toolbar->add_action(*m_save_action);
@@ -291,6 +366,7 @@ void HexEditorWidget::initialize_menubar(GUI::Window& window)
     m_toolbar_container->set_visible(show_toolbar);
     view_menu.add_action(*m_layout_toolbar_action);
     view_menu.add_action(*m_layout_search_results_action);
+    view_menu.add_action(*m_layout_structs_action);
     view_menu.add_separator();
 
     auto bytes_per_row = Config::read_i32("HexEditor", "Layout", "BytesPerRow", 16);

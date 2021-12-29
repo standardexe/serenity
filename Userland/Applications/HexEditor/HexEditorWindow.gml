@@ -14,20 +14,56 @@
         }
     }
 
-    @GUI::HorizontalSplitter {
-        @HexEditor::HexEditor {
-            name: "editor"
+    @GUI::VerticalSplitter {
+        @GUI::HorizontalSplitter {
+            @HexEditor::HexEditor {
+                name: "editor"
+            }
+
+            @GUI::Widget {
+                name: "search_results_container"
+                visible: false
+
+                layout: @GUI::VerticalBoxLayout {
+                }
+
+                @GUI::TableView {
+                    name: "search_results"
+                }
+            }
         }
 
         @GUI::Widget {
-            name: "search_results_container"
+            name: "struct_container"
             visible: false
 
-            layout: @GUI::VerticalBoxLayout {
+            layout: @GUI::HorizontalBoxLayout {
             }
 
             @GUI::TableView {
-                name: "search_results"
+                name: "structs"
+            }
+
+            @GUI::Widget {
+                layout: @GUI::VerticalBoxLayout {
+                }
+
+                fixed_width: 50
+
+                @GUI::Button {
+                    name: "struct_load_button"
+                    text: "..."
+                }
+
+                @GUI::Button {
+                    name: "struct_add_button"
+                    text: "+"
+                }
+
+                @GUI::Button {
+                    name: "struct_remove_button"
+                    text: "-"
+                }
             }
         }
     }

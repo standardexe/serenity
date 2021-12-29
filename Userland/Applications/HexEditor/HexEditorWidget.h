@@ -53,6 +53,7 @@ private:
     RefPtr<GUI::Action> m_goto_offset_action;
     RefPtr<GUI::Action> m_layout_toolbar_action;
     RefPtr<GUI::Action> m_layout_search_results_action;
+    RefPtr<GUI::Action> m_layout_structs_action;
 
     GUI::ActionGroup m_bytes_per_row_actions;
 
@@ -61,6 +62,11 @@ private:
     RefPtr<GUI::ToolbarContainer> m_toolbar_container;
     RefPtr<GUI::TableView> m_search_results;
     RefPtr<GUI::Widget> m_search_results_container;
+    RefPtr<GUI::Widget> m_struct_container;
+
+    RefPtr<GUI::Button> m_struct_load_button;
+    RefPtr<GUI::Button> m_struct_add_button;
+    RefPtr<GUI::Button> m_struct_remove_button;
 
     bool m_document_dirty { false };
 };
